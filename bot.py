@@ -228,7 +228,7 @@ class TeamInfoModal(discord.ui.Modal, title="Team Info"):
 # --- Command ---
 
 
-GUILD_ID = 1397306012557377616
+GUILD_ID = discord.Object(id=1397306012557377616)
 
 
 @bot.tree.command(name="panel", description="Open your private team management panel")
