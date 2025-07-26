@@ -126,14 +126,38 @@ class TeamPanel(discord.ui.View):
 
 def build_panel_embed(user_id):
     user_team = get_user_team(user_id)
+
     if user_team:
         data = teams[user_team]
         leader = f"<@{data['leader']}>" if data['leader'] else "Unknown"
-        description = f"**Team:** `{user_team}`\n**Points:** {data.get('points', 0)}\n**Members:** {len(data['members'])}\n**Leader:** {leader}"
+
+        # Create member mention list
+        member_mentions = []
+        guild = bot.get_guild(GUILD_ID)
+        for uid in data["members"]:
+            member = guild.get_member(int(uid))
+            if member:
+                member_mentions.append(member.mention)
+            else:
+                member_mentions.append(f"<@{uid}> *(left server?)*")
+
+        members_str = ", ".join(
+            member_mentions) if member_mentions else "No members"
+
+        description = (
+            f"**Team:** `{user_team}`\n"
+            f"**Points:** {data.get('points', 0)}\n"
+            f"**Leader:** {leader}\n"
+            f"**Members ({len(data['members'])}):** {members_str}"
+        )
     else:
         description = "You're not in a team. Use the buttons below to create or join one."
 
-    return discord.Embed(title="🛠️ Team Management Panel", description=description, color=discord.Color.blue())
+    return discord.Embed(
+        title="🛠️ Team Management Panel",
+        description=description,
+        color=discord.Color.blue()
+    )
 
 # --- Helper to Send Panel ---
 
