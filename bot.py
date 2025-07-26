@@ -227,6 +227,35 @@ async def team_info(ctx, *, team_name: str = None):
     )
     await ctx.send(embed=embed)
 
+# --- !leaderboard ---
+
+
+@bot.command(name="leaderboard")
+async def leaderboard(ctx):
+    if not teams:
+        embed = discord.Embed(
+            title="📉 Leaderboard",
+            description="No teams found yet.",
+            color=discord.Color.dark_gray()
+        )
+        return await ctx.send(embed=embed)
+
+    sorted_teams = sorted(
+        teams.items(), key=lambda x: x[1].get("points", 0), reverse=True)
+
+    leaderboard_text = ""
+    for index, (team_name, data) in enumerate(sorted_teams, start=1):
+        points = data.get("points", 0)
+        leaderboard_text += f"**#{index}** — `{team_name}`: {points} points\n"
+
+    embed = discord.Embed(
+        title="🏆 Team Leaderboard",
+        description=leaderboard_text,
+        color=discord.Color.gold()
+    )
+    await ctx.send(embed=embed)
+
+
 # --- Run Bot ---
 with open("token.txt") as f:
     token = f.read().strip()
