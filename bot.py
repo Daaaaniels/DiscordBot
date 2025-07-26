@@ -49,10 +49,11 @@ class TeamStatsButton(discord.ui.View):
 
         member_count = len(team_data["members"])
         points = team_data.get("points", 0)
+        leader_id = team_data.get("leader", "Unknown")
 
         embed = discord.Embed(
             title=f"🔢 Stats for `{self.team_name}`",
-            description=f"**Members:** {member_count}\n**Points:** {points}",
+            description=f"**Members:** {member_count}\n**Points:** {points}\n**Leader:** <@{leader_id}>",
             color=discord.Color.purple()
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -73,12 +74,13 @@ async def create_team(ctx, *, team_name: str):
     role = await guild.create_role(name=team_name)
     await ctx.author.add_roles(role)
 
-    teams[team_name] = {"members": [user_id], "points": 0}
+    teams[team_name] = {"members": [user_id], "points": 0, "leader": user_id}
     with open(TEAM_FILE, "w") as f:
         json.dump(teams, f, indent=4)
 
     embed = discord.Embed(title="🎉 Team Created",
-                          description=f"You created team `{team_name}` and received the role.", color=discord.Color.green())
+                          description=f"You created team `{team_name}` and received the role. You are the team leader.",
+                          color=discord.Color.green())
     await ctx.send(embed=embed, view=TeamStatsButton(team_name))
 
 # --- !join_team ---
@@ -90,8 +92,8 @@ async def join_team(ctx, *, team_name: str):
     guild = ctx.guild
 
     if team_name not in teams:
-        embed = discord.Embed(
-            title="❌ Team Not Found", description=f"No team named `{team_name}` exists.", color=discord.Color.red())
+        embed = discord.Embed(title="❌ Team Not Found", description=f"No team named `{team_name}` exists.",
+                              color=discord.Color.red())
         return await ctx.send(embed=embed)
 
     for name, data in teams.items():
@@ -124,21 +126,78 @@ async def leave_team(ctx):
         if user_id in data["members"]:
             data["members"].remove(user_id)
             role = discord.utils.get(guild.roles, name=team_name)
+
+            if user_id == data.get("leader"):
+                if data["members"]:
+                    data["leader"] = data["members"][0]  # new leader
+                    new_leader = f"<@{data['leader']}>"
+                else:
+                    data["leader"] = None
+                    new_leader = "None"
+            else:
+                new_leader = f"<@{data['leader']}>"
+
             if role:
                 await ctx.author.remove_roles(role)
             if not data["members"]:
                 if role:
                     await role.delete()
                 del teams[team_name]
+
             with open(TEAM_FILE, "w") as f:
                 json.dump(teams, f, indent=4)
 
             embed = discord.Embed(
-                title="👋 Left Team", description=f"You left `{team_name}`.", color=discord.Color.blue())
+                title="👋 Left Team", description=f"You left `{team_name}`.\nNew Leader: {new_leader}",
+                color=discord.Color.blue())
             return await ctx.send(embed=embed)
 
     embed = discord.Embed(title="⚠️ Not in Team",
                           description="You are not currently in any team.", color=discord.Color.red())
+    await ctx.send(embed=embed)
+
+# --- !kick_member ---
+
+
+@bot.command(name="kick_member")
+async def kick_member(ctx, member: discord.Member):
+    user_id = str(ctx.author.id)
+    target_id = str(member.id)
+    guild = ctx.guild
+
+    for team_name, data in teams.items():
+        if user_id == data.get("leader"):
+            if target_id in data["members"]:
+                if target_id == user_id:
+                    embed = discord.Embed(title="❌ Cannot Kick Self",
+                                          description="You cannot kick yourself from your own team.",
+                                          color=discord.Color.red())
+                    return await ctx.send(embed=embed)
+
+                data["members"].remove(target_id)
+                role = discord.utils.get(guild.roles, name=team_name)
+                if role:
+                    await member.remove_roles(role)
+
+                with open(TEAM_FILE, "w") as f:
+                    json.dump(teams, f, indent=4)
+
+                embed = discord.Embed(
+                    title="👢 Member Kicked",
+                    description=f"<@{target_id}> has been removed from `{team_name}`.",
+                    color=discord.Color.orange()
+                )
+                return await ctx.send(embed=embed)
+
+            else:
+                embed = discord.Embed(title="⚠️ Not a Member",
+                                      description=f"{member.mention} is not in your team.",
+                                      color=discord.Color.red())
+                return await ctx.send(embed=embed)
+
+    embed = discord.Embed(title="🚫 Not a Leader",
+                          description="Only the team leader can use this command.",
+                          color=discord.Color.red())
     await ctx.send(embed=embed)
 
 # --- !team_info ---
@@ -159,10 +218,11 @@ async def team_info(ctx, *, team_name: str = None):
 
     member_count = len(team_data["members"])
     points = team_data.get("points", 0)
+    leader_id = team_data.get("leader", "Unknown")
 
     embed = discord.Embed(
         title=f"🔢 Stats for `{team_name}`",
-        description=f"**Members:** {member_count}\n**Points:** {points}",
+        description=f"**Members:** {member_count}\n**Points:** {points}\n**Leader:** <@{leader_id}>",
         color=discord.Color.purple()
     )
     await ctx.send(embed=embed)
