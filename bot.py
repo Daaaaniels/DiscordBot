@@ -386,6 +386,6 @@ async def admin_panel(ctx):
 
 
 # --- Run ---
-token = os.getenv(
-    "MTM5ODQxMjI2Nzg5MTk4MjU0OA.G4v19J.0rbBLWWdQnbDlEew3wYRoO-LxOKrmZkGvnU4rM")
+token = os.getenv("DISCORD_TOKEN")
 bot.run(token)
+
