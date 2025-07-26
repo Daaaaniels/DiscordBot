@@ -116,9 +116,10 @@ class TeamPanel(discord.ui.View):
             for i, (team, data) in enumerate(sorted_teams, start=1):
                 text += f"**#{i}** `{team}` — {data.get('points', 0)} points\n"
 
-            embed = discord.Embed(title="🏆 Team Leaderboard",
-                                  description=text, color=discord.Color.gold())
+            embed = discord.Embed(
+                title="🏆 Team Leaderboard", description=text, color=discord.Color.gold())
             await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 # --- Embeds ---
 
@@ -227,11 +228,24 @@ class TeamInfoModal(discord.ui.Modal, title="Team Info"):
 # --- Command ---
 
 
-@bot.command(name="panel")
-async def panel(ctx):
-    embed = build_panel_embed(ctx.author.id)
-    view = TeamPanel(ctx.author.id)
-    await ctx.send(embed=embed, view=view)
+GUILD_ID = 1397306012557377616
+
+
+@bot.tree.command(name="panel", description="Open your private team management panel")
+@discord.app_commands.guilds(discord.Object(id=GUILD_ID))
+async def panel(interaction: discord.Interaction):
+    embed = build_panel_embed(interaction.user.id)
+    view = TeamPanel(interaction.user.id)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+
+@bot.event
+async def on_ready():
+    try:
+        await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+        print(f"✅ Synced commands to guild {GUILD_ID}")
+    except Exception as e:
+        print(f"❌ Failed to sync: {e}")
 
 
 # --- Admin Panel View ---
@@ -388,4 +402,3 @@ async def admin_panel(ctx):
 # --- Run ---
 token = os.getenv("DISCORD_TOKEN")
 bot.run(token)
-
