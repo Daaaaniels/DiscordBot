@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import json
 import os
+from discord.ext.commands import has_permissions, MissingPermissions
 
 # --- Setup ---
 intents = discord.Intents.default()
@@ -254,6 +255,125 @@ async def leaderboard(ctx):
         color=discord.Color.gold()
     )
     await ctx.send(embed=embed)
+
+# --- Admin: Kick Member ---
+
+
+@bot.command(name="admin_kick")
+@has_permissions(administrator=True)
+async def admin_kick(ctx, team_name: str, member: discord.Member):
+    user_id = str(member.id)
+
+    if team_name not in teams or user_id not in teams[team_name]["members"]:
+        return await ctx.send(embed=discord.Embed(
+            title="❌ Error",
+            description=f"{member.mention} is not in team `{team_name}`.",
+            color=discord.Color.red()
+        ))
+
+    teams[team_name]["members"].remove(user_id)
+    role = discord.utils.get(ctx.guild.roles, name=team_name)
+    if role:
+        await member.remove_roles(role)
+
+    await ctx.send(embed=discord.Embed(
+        title="👢 Kicked",
+        description=f"{member.mention} was removed from `{team_name}`.",
+        color=discord.Color.orange()
+    ))
+
+    # Delete team if no members remain
+    if not teams[team_name]["members"]:
+        if role:
+            await role.delete()
+        del teams[team_name]
+
+    with open(TEAM_FILE, "w") as f:
+        json.dump(teams, f, indent=4)
+
+
+# --- Admin: Add Points ---
+@bot.command(name="admin_add_points")
+@has_permissions(administrator=True)
+async def admin_add_points(ctx, team_name: str, amount: int):
+    if team_name not in teams:
+        return await ctx.send(embed=discord.Embed(
+            title="❌ Error",
+            description=f"Team `{team_name}` not found.",
+            color=discord.Color.red()
+        ))
+
+    teams[team_name]["points"] += amount
+    with open(TEAM_FILE, "w") as f:
+        json.dump(teams, f, indent=4)
+
+    await ctx.send(embed=discord.Embed(
+        title="➕ Points Assigned",
+        description=f"Added `{amount}` points to `{team_name}`.",
+        color=discord.Color.green()
+    ))
+
+
+# --- Admin: Remove Points ---
+@bot.command(name="admin_remove_points")
+@has_permissions(administrator=True)
+async def admin_remove_points(ctx, team_name: str, amount: int):
+    if team_name not in teams:
+        return await ctx.send(embed=discord.Embed(
+            title="❌ Error",
+            description=f"Team `{team_name}` not found.",
+            color=discord.Color.red()
+        ))
+
+    teams[team_name]["points"] = max(0, teams[team_name]["points"] - amount)
+    with open(TEAM_FILE, "w") as f:
+        json.dump(teams, f, indent=4)
+
+    await ctx.send(embed=discord.Embed(
+        title="➖ Points Reduced",
+        description=f"Removed `{amount}` points from `{team_name}`.",
+        color=discord.Color.orange()
+    ))
+
+
+# --- Admin: Delete Team ---
+@bot.command(name="admin_delete_team")
+@has_permissions(administrator=True)
+async def admin_delete_team(ctx, *, team_name: str):
+    if team_name not in teams:
+        return await ctx.send(embed=discord.Embed(
+            title="❌ Error",
+            description=f"Team `{team_name}` not found.",
+            color=discord.Color.red()
+        ))
+
+    role = discord.utils.get(ctx.guild.roles, name=team_name)
+    if role:
+        await role.delete()
+
+    del teams[team_name]
+    with open(TEAM_FILE, "w") as f:
+        json.dump(teams, f, indent=4)
+
+    await ctx.send(embed=discord.Embed(
+        title="🗑️ Team Deleted",
+        description=f"Team `{team_name}` has been deleted.",
+        color=discord.Color.red()
+    ))
+
+
+# --- Handle Missing Permissions Error ---
+@admin_kick.error
+@admin_add_points.error
+@admin_remove_points.error
+@admin_delete_team.error
+async def admin_permission_error(ctx, error):
+    if isinstance(error, MissingPermissions):
+        await ctx.send(embed=discord.Embed(
+            title="🚫 No Permission",
+            description="You must be an **Administrator** to use this command.",
+            color=discord.Color.red()
+        ))
 
 
 # --- Run Bot ---
