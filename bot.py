@@ -216,15 +216,29 @@ class TeamInfoModal(discord.ui.Modal, title="Team Info"):
     async def on_submit(self, interaction: discord.Interaction):
         name = self.team_name.value.strip()
         data = teams.get(name)
+
         if not data:
-            return await interaction.response.send_message("Team not found.", ephemeral=True)
+            return await interaction.response.send_message("❌ Team not found.", ephemeral=True)
+
+        member_mentions = []
+        for user_id in data["members"]:
+            member = interaction.guild.get_member(int(user_id))
+            if member:
+                member_mentions.append(member.mention)
+            else:
+                member_mentions.append(f"<@{user_id}> *(left server?)*")
+
+        members_str = "\n".join(
+            member_mentions) if member_mentions else "No members"
+        leader_mention = f"<@{data['leader']}>" if data['leader'] else "Unknown"
 
         embed = discord.Embed(
-            title=f"Stats for `{name}`",
-            description=f"**Members:** {len(data['members'])}\n**Points:** {data.get('points', 0)}\n**Leader:** <@{data['leader']}>",
+            title=f"📊 Stats for `{name}`",
+            description=f"**Leader:** {leader_mention}\n**Points:** {data.get('points', 0)}\n**Members ({len(data['members'])}):**\n{members_str}",
             color=discord.Color.purple()
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
+
 
 # --- Command ---
 
