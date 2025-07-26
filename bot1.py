@@ -5,7 +5,7 @@ from discord.ext import commands
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-GUILD_ID = 1397306012557377616  # Replace with your real guild ID
+GUILD_ID = int(1397306012557377616)  # Replace with your real guild ID
 
 
 @bot.event
@@ -27,4 +27,4 @@ async def panel(interaction: discord.Interaction):
 
 # --- Run the bot ---
 token = os.getenv("DISCORD_TOKEN")  # Or just replace with token directly
-bot.run(token)
+bot.run("MTM5ODQxMjI2Nzg5MTk4MjU0OA.G4v19J.0rbBLWWdQnbDlEew3wYRoO-LxOKrmZkGvnU4rM")

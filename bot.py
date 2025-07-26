@@ -143,6 +143,7 @@ async def send_panel(interaction):
     view = TeamPanel(interaction.user.id)
     await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
+
 # --- Modals ---
 
 
@@ -228,22 +229,34 @@ class TeamInfoModal(discord.ui.Modal, title="Team Info"):
 # --- Command ---
 
 
-GUILD_ID = discord.Object(id=1397306012557377616)
+GUILD_ID = int(1397306012557377616)
 
 
 @bot.tree.command(name="panel", description="Open your private team management panel")
 @discord.app_commands.guilds(discord.Object(id=GUILD_ID))
 async def panel(interaction: discord.Interaction):
+    # Defer immediately to avoid timeout
+    await interaction.response.defer(thinking=False, ephemeral=True)
+
+    # Then send the panel using followup
     embed = build_panel_embed(interaction.user.id)
     view = TeamPanel(interaction.user.id)
-    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
 @bot.event
 async def on_ready():
     try:
+        # Clear global commands
+        bot.tree.clear_commands(guild=None)  # ✅ this is NOT awaitable
+        # Sync to apply cleared global commands
+        await bot.tree.sync(guild=None)
+        print("🧹 Cleared global commands.")
+
+        # Sync to your guild
         await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
         print(f"✅ Synced commands to guild {GUILD_ID}")
+
     except Exception as e:
         print(f"❌ Failed to sync: {e}")
 
