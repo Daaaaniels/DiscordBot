@@ -2,6 +2,16 @@ import discord
 from discord.ext import commands
 import json
 import os
+# --- Setup DB (Replit DB or local fake) ---
+try:
+    from replit import db  # works on Railway / Replit
+except ImportError:
+    # Fallback for local testing
+    class FakeDB(dict):
+        def get(self, key, default=None):
+            return self[key] if key in self else default
+    db = FakeDB()
+
 
 # --- Setup ---
 intents = discord.Intents.default()
@@ -10,20 +20,40 @@ intents.members = True
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-TEAM_FILE = "teams.json"
-
-# --- Load or initialize team data ---
-if os.path.exists(TEAM_FILE):
-    with open(TEAM_FILE, "r") as f:
-        teams = json.load(f)
-else:
-    teams = {}
 
 # --- Helper: Get User Team ---
 
 
 def get_user_team(user_id):
+    teams = get_teams()
     for name, data in teams.items():
+        if str(user_id) in data["members"]:
+            return name
+    return None
+
+
+# --- Team DB Helpers ---
+def get_teams():
+    if not db or not hasattr(db, "get"):
+        return {}
+    return dict(db.get("teams") or {})
+
+
+def save_team(name, data):
+    teams = get_teams()
+    teams[name] = data
+    db["teams"] = teams
+
+
+def delete_team(name):
+    teams = get_teams()
+    if name in teams:
+        del teams[name]
+        db["teams"] = teams
+
+
+def get_user_team(user_id):
+    for name, data in get_teams().items():
         if str(user_id) in data["members"]:
             return name
     return None
@@ -67,6 +97,7 @@ class TeamPanel(discord.ui.View):
 
         async def callback(self, interaction: discord.Interaction):
             user_id = str(interaction.user.id)
+            teams = get_teams()
             team = teams.get(self.team_name)
 
             if not team or user_id not in team["members"]:
@@ -79,19 +110,18 @@ class TeamPanel(discord.ui.View):
             if role:
                 await interaction.user.remove_roles(role)
 
-            if team["leader"] == user_id:
-                team["leader"] = team["members"][0] if team["members"] else None
-
             if not team["members"]:
                 if role:
                     await role.delete()
-                del teams[self.team_name]
-
-            with open(TEAM_FILE, "w") as f:
-                json.dump(teams, f, indent=4)
+                delete_team(self.team_name)
+            else:
+                if team["leader"] == user_id:
+                    team["leader"] = team["members"][0] if team["members"] else None
+                save_team(self.team_name, team)
 
             feedback = discord.Embed(
-                description=f"✅ You left `{self.team_name}`.", color=discord.Color.blue())
+                description=f"✅ You left `{self.team_name}`.", color=discord.Color.blue()
+            )
             await interaction.response.send_message(embed=feedback, ephemeral=True)
             await send_panel(interaction)
 
@@ -107,17 +137,21 @@ class TeamPanel(discord.ui.View):
             super().__init__(label="🏆 Leaderboard", style=discord.ButtonStyle.gray)
 
         async def callback(self, interaction: discord.Interaction):
+            teams = get_teams()  # ✅ Fetch from DB here
+
             if not teams:
                 return await interaction.response.send_message("No teams yet.", ephemeral=True)
 
             sorted_teams = sorted(
-                teams.items(), key=lambda x: x[1].get("points", 0), reverse=True)
+                teams.items(), key=lambda x: x[1].get("points", 0), reverse=True
+            )
             text = ""
             for i, (team, data) in enumerate(sorted_teams, start=1):
                 text += f"**#{i}** `{team}` — {data.get('points', 0)} points\n"
 
             embed = discord.Embed(
-                title="🏆 Team Leaderboard", description=text, color=discord.Color.gold())
+                title="🏆 Team Leaderboard", description=text, color=discord.Color.gold()
+            )
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
@@ -125,25 +159,16 @@ class TeamPanel(discord.ui.View):
 
 
 def build_panel_embed(user_id):
+    teams = get_teams()  # ✅ Use your wrapper!
     user_team = get_user_team(user_id)
-
     if user_team:
         data = teams[user_team]
         leader = f"<@{data['leader']}>" if data['leader'] else "Unknown"
-
-        # Create member mention list
-        member_mentions = []
-        guild = bot.get_guild(GUILD_ID)
-        for uid in data["members"]:
-            member = guild.get_member(int(uid))
-            if member:
-                member_mentions.append(member.mention)
-            else:
-                member_mentions.append(f"<@{uid}> *(left server?)*")
-
+        member_mentions = [
+            f"<@{uid}>" for uid in data['members']
+        ]
         members_str = ", ".join(
             member_mentions) if member_mentions else "No members"
-
         description = (
             f"**Team:** `{user_team}`\n"
             f"**Points:** {data.get('points', 0)}\n"
@@ -181,6 +206,7 @@ class CreateTeamModal(discord.ui.Modal, title="Create a New Team"):
     async def on_submit(self, interaction: discord.Interaction):
         name = self.team_name.value.strip()
         user_id = str(interaction.user.id)
+        teams = get_teams()
 
         if name in teams:
             return await interaction.response.send_message("Team already exists.", ephemeral=True)
@@ -192,9 +218,7 @@ class CreateTeamModal(discord.ui.Modal, title="Create a New Team"):
         role = await interaction.guild.create_role(name=name)
         await interaction.user.add_roles(role)
 
-        teams[name] = {"members": [user_id], "points": 0, "leader": user_id}
-        with open(TEAM_FILE, "w") as f:
-            json.dump(teams, f, indent=4)
+        save_team(name, {"members": [user_id], "points": 0, "leader": user_id})
 
         feedback = discord.Embed(
             description=f"✅ Team `{name}` created successfully!", color=discord.Color.green())
@@ -212,6 +236,7 @@ class JoinTeamModal(discord.ui.Modal, title="Join a Team"):
     async def on_submit(self, interaction: discord.Interaction):
         name = self.team_name.value.strip()
         user_id = str(interaction.user.id)
+        teams = get_teams()
 
         if name not in teams:
             return await interaction.response.send_message("Team does not exist.", ephemeral=True)
@@ -221,12 +246,11 @@ class JoinTeamModal(discord.ui.Modal, title="Join a Team"):
                 return await interaction.response.send_message("You're already in a team.", ephemeral=True)
 
         teams[name]["members"].append(user_id)
+        save_team(name, teams[name])
+
         role = discord.utils.get(interaction.guild.roles, name=name)
         if role:
             await interaction.user.add_roles(role)
-
-        with open(TEAM_FILE, "w") as f:
-            json.dump(teams, f, indent=4)
 
         feedback = discord.Embed(
             description=f"✅ You joined `{name}`!", color=discord.Color.green())
@@ -239,7 +263,7 @@ class TeamInfoModal(discord.ui.Modal, title="Team Info"):
 
     async def on_submit(self, interaction: discord.Interaction):
         name = self.team_name.value.strip()
-        data = teams.get(name)
+        data = get_teams().get(name)
 
         if not data:
             return await interaction.response.send_message("❌ Team not found.", ephemeral=True)
@@ -266,23 +290,19 @@ class TeamInfoModal(discord.ui.Modal, title="Team Info"):
 
 # --- Command ---
 
-
 GUILD_ID = int(1397306012557377616)
 
 
 @bot.event
 async def on_ready():
-    try:
-        # Clear global commands
-        bot.tree.clear_commands(guild=None)  # ✅ this is NOT awaitable
-        # Sync to apply cleared global commands
-        await bot.tree.sync(guild=None)
-        print("🧹 Cleared global commands.")
+    db_type = 'Replit DB' if 'replit' in str(type(db)) else 'Fake local DB'
+    print(f"✅ Bot is ready. Using {db_type}")
 
-        # Sync to your guild
+    try:
+        bot.tree.clear_commands(guild=None)
+        await bot.tree.sync(guild=None)
         await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
         print(f"✅ Synced commands to guild {GUILD_ID}")
-
     except Exception as e:
         print(f"❌ Failed to sync: {e}")
 
@@ -290,34 +310,12 @@ async def on_ready():
 @bot.tree.command(name="panel", description="Open your private team management panel")
 @discord.app_commands.guilds(discord.Object(id=GUILD_ID))
 async def panel(interaction: discord.Interaction):
-    # Defer immediately to avoid timeout
-    await interaction.response.defer(thinking=False, ephemeral=True)
-
-    # Then send the panel using followup
     embed = build_panel_embed(interaction.user.id)
     view = TeamPanel(interaction.user.id)
-    await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-
-
-@bot.event
-async def on_ready():
-    try:
-        # Clear global commands
-        bot.tree.clear_commands(guild=None)  # ✅ this is NOT awaitable
-        # Sync to apply cleared global commands
-        await bot.tree.sync(guild=None)
-        print("🧹 Cleared global commands.")
-
-        # Sync to your guild
-        await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-        print(f"✅ Synced commands to guild {GUILD_ID}")
-
-    except Exception as e:
-        print(f"❌ Failed to sync: {e}")
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
 # --- Admin Panel View ---
-
 class AdminPanel(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -354,15 +352,15 @@ class AdminPanel(discord.ui.View):
         async def callback(self, interaction: discord.Interaction):
             await interaction.response.send_modal(AdminDeleteTeamModal())
 
-
 # --- Admin Modals ---
+
 
 class AdminKickMemberModal(discord.ui.Modal, title="Kick Member from Team"):
     team_name = discord.ui.TextInput(label="Team Name")
     member_id = discord.ui.TextInput(label="User ID to Kick")
 
     async def on_submit(self, interaction: discord.Interaction):
-        team = teams.get(self.team_name.value.strip())
+        team = get_teams().get(self.team_name.value.strip())
         if not team:
             return await interaction.response.send_message("❌ Team not found.", ephemeral=True)
 
@@ -380,17 +378,14 @@ class AdminKickMemberModal(discord.ui.Modal, title="Kick Member from Team"):
                 interaction.guild.roles, name=self.team_name.value.strip())
             if role:
                 await role.delete()
-            del teams[self.team_name.value.strip()]
-
+            delete_team(self.team_name.value.strip())
         else:
+            save_team(self.team_name.value.strip(), team)
             role = discord.utils.get(
                 interaction.guild.roles, name=self.team_name.value.strip())
             member_obj = interaction.guild.get_member(int(member))
             if role and member_obj:
                 await member_obj.remove_roles(role)
-
-        with open(TEAM_FILE, "w") as f:
-            json.dump(teams, f, indent=4)
 
         await interaction.response.send_message("✅ Member kicked.", ephemeral=True)
 
@@ -401,6 +396,7 @@ class AdminAddPointsModal(discord.ui.Modal, title="Add Points to Team"):
 
     async def on_submit(self, interaction: discord.Interaction):
         name = self.team_name.value.strip()
+        teams = get_teams()
         if name not in teams:
             return await interaction.response.send_message("❌ Team not found.", ephemeral=True)
 
@@ -410,8 +406,7 @@ class AdminAddPointsModal(discord.ui.Modal, title="Add Points to Team"):
             return await interaction.response.send_message("❌ Invalid number.", ephemeral=True)
 
         teams[name]["points"] += add
-        with open(TEAM_FILE, "w") as f:
-            json.dump(teams, f, indent=4)
+        save_team(name, teams[name])
 
         await interaction.response.send_message(f"✅ Added {add} points to `{name}`.", ephemeral=True)
 
@@ -422,6 +417,7 @@ class AdminSubtractPointsModal(discord.ui.Modal, title="Subtract Points from Tea
 
     async def on_submit(self, interaction: discord.Interaction):
         name = self.team_name.value.strip()
+        teams = get_teams()
         if name not in teams:
             return await interaction.response.send_message("❌ Team not found.", ephemeral=True)
 
@@ -431,8 +427,7 @@ class AdminSubtractPointsModal(discord.ui.Modal, title="Subtract Points from Tea
             return await interaction.response.send_message("❌ Invalid number.", ephemeral=True)
 
         teams[name]["points"] = max(0, teams[name]["points"] - subtract)
-        with open(TEAM_FILE, "w") as f:
-            json.dump(teams, f, indent=4)
+        save_team(name, teams[name])
 
         await interaction.response.send_message(f"✅ Subtracted {subtract} points from `{name}`.", ephemeral=True)
 
@@ -442,22 +437,19 @@ class AdminDeleteTeamModal(discord.ui.Modal, title="Delete Team"):
 
     async def on_submit(self, interaction: discord.Interaction):
         name = self.team_name.value.strip()
-        if name not in teams:
+        if name not in get_teams():
             return await interaction.response.send_message("❌ Team not found.", ephemeral=True)
 
         role = discord.utils.get(interaction.guild.roles, name=name)
         if role:
             await role.delete()
 
-        del teams[name]
-
-        with open(TEAM_FILE, "w") as f:
-            json.dump(teams, f, indent=4)
+        delete_team(name)
 
         await interaction.response.send_message(f"✅ Team `{name}` deleted.", ephemeral=True)
 
-
 # --- Admin Panel Command ---
+
 
 @bot.command(name="admin_panel")
 @commands.has_permissions(administrator=True)
@@ -468,5 +460,5 @@ async def admin_panel(ctx):
 
 
 # --- Run ---
-token = os.getenv("DISCORD_TOKEN")
-bot.run(token)
+# token = os.getenv("DISCORD_TOKEN")
+bot.run("MTM5ODQxMjI2Nzg5MTk4MjU0OA.G4v19J.0rbBLWWdQnbDlEew3wYRoO-LxOKrmZkGvnU4rM")
