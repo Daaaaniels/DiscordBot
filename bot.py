@@ -1,16 +1,30 @@
+
 import discord
 from discord.ext import commands
 import json
 import os
+
 # --- Setup DB (Replit DB or local fake) ---
 try:
-    from replit import db  # works on Railway / Replit
+    from replit import db as replit_db
+    try:
+        # Try a test read/write to confirm it's working
+        _ = replit_db.get("test_key", "test_default")
+        db = replit_db
+        print("✅ Using Replit DB")
+    except Exception:
+        raise ImportError("Replit DB not configured")
 except ImportError:
-    # Fallback for local testing
     class FakeDB(dict):
         def get(self, key, default=None):
-            return self[key] if key in self else default
+            return super().get(key, default)
+
+        def __setitem__(self, key, value):
+            super().__setitem__(key, value)
     db = FakeDB()
+    print("✅ Using Fake local DB")
+
+print(f"✅ DB Object Type: {type(db)}")
 
 
 # --- Setup ---
@@ -96,12 +110,15 @@ class TeamPanel(discord.ui.View):
             self.team_name = team_name
 
         async def callback(self, interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True)
+
             user_id = str(interaction.user.id)
             teams = get_teams()
             team = teams.get(self.team_name)
 
             if not team or user_id not in team["members"]:
-                return await interaction.response.send_message("You're not in this team anymore.", ephemeral=True)
+                await interaction.followup.send("You're not in this team anymore.", ephemeral=True)
+                return
 
             team["members"].remove(user_id)
 
@@ -122,7 +139,7 @@ class TeamPanel(discord.ui.View):
             feedback = discord.Embed(
                 description=f"✅ You left `{self.team_name}`.", color=discord.Color.blue()
             )
-            await interaction.response.send_message(embed=feedback, ephemeral=True)
+            await interaction.followup.send(embed=feedback, ephemeral=True)
             await send_panel(interaction)
 
     class TeamInfoButtonModal(discord.ui.Button):
@@ -137,10 +154,12 @@ class TeamPanel(discord.ui.View):
             super().__init__(label="🏆 Leaderboard", style=discord.ButtonStyle.gray)
 
         async def callback(self, interaction: discord.Interaction):
-            teams = get_teams()  # ✅ Fetch from DB here
+            await interaction.response.defer(ephemeral=True)
+            teams = get_teams()
 
             if not teams:
-                return await interaction.response.send_message("No teams yet.", ephemeral=True)
+                await interaction.followup.send("No teams yet.", ephemeral=True)
+                return
 
             sorted_teams = sorted(
                 teams.items(), key=lambda x: x[1].get("points", 0), reverse=True
@@ -152,7 +171,7 @@ class TeamPanel(discord.ui.View):
             embed = discord.Embed(
                 title="🏆 Team Leaderboard", description=text, color=discord.Color.gold()
             )
-            await interaction.response.send_message(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 # --- Embeds ---
@@ -198,6 +217,8 @@ async def send_panel(interaction):
 
 class CreateTeamModal(discord.ui.Modal, title="Create a New Team"):
     team_name = discord.ui.TextInput(label="Team Name")
+    team_code = discord.ui.TextInput(
+        label="4-digit Join Code (e.g. 1234)", max_length=4)
 
     def __init__(self, user_id):
         super().__init__()
@@ -205,29 +226,42 @@ class CreateTeamModal(discord.ui.Modal, title="Create a New Team"):
 
     async def on_submit(self, interaction: discord.Interaction):
         name = self.team_name.value.strip()
+        code = self.team_code.value.strip()
         user_id = str(interaction.user.id)
         teams = get_teams()
 
+        # Validate code
+        if not code.isdigit() or len(code) != 4:
+            return await interaction.response.send_message("❌ Code must be a 4-digit number.", ephemeral=True)
+
         if name in teams:
-            return await interaction.response.send_message("Team already exists.", ephemeral=True)
+            return await interaction.response.send_message("❌ Team already exists.", ephemeral=True)
 
         for data in teams.values():
             if data["leader"] == user_id:
-                return await interaction.response.send_message("You already created a team.", ephemeral=True)
+                return await interaction.response.send_message("❌ You already created a team.", ephemeral=True)
 
         role = await interaction.guild.create_role(name=name)
         await interaction.user.add_roles(role)
 
-        save_team(name, {"members": [user_id], "points": 0, "leader": user_id})
+        save_team(name, {
+            "members": [user_id],
+            "points": 0,
+            "leader": user_id,
+            "code": code  # ✅ Save the code
+        })
 
-        feedback = discord.Embed(
-            description=f"✅ Team `{name}` created successfully!", color=discord.Color.green())
-        await interaction.response.send_message(embed=feedback, ephemeral=True)
+        embed = discord.Embed(
+            description=f"✅ Team `{name}` created successfully with join code `{code}`!",
+            color=discord.Color.green()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         await send_panel(interaction)
 
 
 class JoinTeamModal(discord.ui.Modal, title="Join a Team"):
     team_name = discord.ui.TextInput(label="Team Name")
+    team_code = discord.ui.TextInput(label="4-digit Join Code")
 
     def __init__(self, user_id):
         super().__init__()
@@ -235,26 +269,34 @@ class JoinTeamModal(discord.ui.Modal, title="Join a Team"):
 
     async def on_submit(self, interaction: discord.Interaction):
         name = self.team_name.value.strip()
+        code = self.team_code.value.strip()
         user_id = str(interaction.user.id)
         teams = get_teams()
 
         if name not in teams:
-            return await interaction.response.send_message("Team does not exist.", ephemeral=True)
+            return await interaction.response.send_message("❌ Team does not exist.", ephemeral=True)
+
+        team = teams[name]
+
+        if team.get("code") != code:
+            return await interaction.response.send_message("❌ Incorrect join code.", ephemeral=True)
 
         for data in teams.values():
             if user_id in data["members"]:
-                return await interaction.response.send_message("You're already in a team.", ephemeral=True)
+                return await interaction.response.send_message("❌ You're already in a team.", ephemeral=True)
 
-        teams[name]["members"].append(user_id)
-        save_team(name, teams[name])
+        team["members"].append(user_id)
+        save_team(name, team)
 
         role = discord.utils.get(interaction.guild.roles, name=name)
         if role:
             await interaction.user.add_roles(role)
 
-        feedback = discord.Embed(
-            description=f"✅ You joined `{name}`!", color=discord.Color.green())
-        await interaction.response.send_message(embed=feedback, ephemeral=True)
+        embed = discord.Embed(
+            description=f"✅ You joined `{name}`!",
+            color=discord.Color.green()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
         await send_panel(interaction)
 
 
@@ -280,16 +322,26 @@ class TeamInfoModal(discord.ui.Modal, title="Team Info"):
             member_mentions) if member_mentions else "No members"
         leader_mention = f"<@{data['leader']}>" if data['leader'] else "Unknown"
 
+        # ✅ Only show code if user is leader or has administrator permission
+        show_code = (str(interaction.user.id) ==
+                     data["leader"]) or interaction.user.guild_permissions.administrator
+        code_info = f"\n**Join Code:** `{data['code']}`" if show_code and data.get(
+            "code") else ""
+
         embed = discord.Embed(
             title=f"📊 Stats for `{name}`",
-            description=f"**Leader:** {leader_mention}\n**Points:** {data.get('points', 0)}\n**Members ({len(data['members'])}):**\n{members_str}",
+            description=(
+                f"**Leader:** {leader_mention}\n"
+                f"**Points:** {data.get('points', 0)}\n"
+                f"**Members ({len(data['members'])}):**\n{members_str}"
+                f"{code_info}"  # ✅ appended only if permitted
+            ),
             color=discord.Color.purple()
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 # --- Command ---
-
 GUILD_ID = int(1397306012557377616)
 
 
@@ -310,8 +362,12 @@ async def on_ready():
 @bot.tree.command(name="panel", description="Open your private team management panel")
 @discord.app_commands.guilds(discord.Object(id=GUILD_ID))
 async def panel(interaction: discord.Interaction):
+    # ✅ defers response quickly
+    # await interaction.response.defer(ephemeral=True)
+
     embed = build_panel_embed(interaction.user.id)
     view = TeamPanel(interaction.user.id)
+    # ✅ followup, not response
     await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
