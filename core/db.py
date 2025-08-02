@@ -1,106 +1,89 @@
-try:
-    from replit import db as replit_db
-    _ = replit_db.get("test_key", "test_default")
-    db = replit_db
-    print("✅ Using Replit DB")
-except Exception:
-    class FakeDB:
-        def __init__(self):
-            self._data = {}
+import aiosqlite
+import ast
 
-        def get(self, key, default=None):
-            return self._data.get(key, default)
-
-        def __setitem__(self, key, value):
-            self._data[key] = value
-
-        def __getitem__(self, key):
-            return self._data[key]
-
-        def __delitem__(self, key):
-            if key in self._data:
-                del self._data[key]
-
-        def __contains__(self, key):
-            return key in self._data
-
-        def prefix(self, start):
-            return [k for k in self._data if k.startswith(start)]
-
-    db = FakeDB()
-    print("✅ Using Fake local DB")
-
-# --- Team Management ---
+DATABASE = "data.db"
 
 
-def get_teams():
-    return dict(db.get("teams") or {})
+async def init_db():
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.executescript("""
+        CREATE TABLE IF NOT EXISTS teams (
+          name TEXT PRIMARY KEY,
+          data TEXT
+        );
+        CREATE TABLE IF NOT EXISTS submissions (
+          id TEXT PRIMARY KEY,
+          data TEXT
+        );
+        """)
+        await db.commit()
 
 
-def save_team(name, data):
-    teams = get_teams()
-    teams[name] = data
-    db["teams"] = teams
+# --- General-Purpose Functions ---
 
 
-def delete_team(name):
-    teams = get_teams()
-    if name in teams:
-        del teams[name]
-        db["teams"] = teams
+async def get(key, table):
+    async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute(f"SELECT data FROM {table} WHERE name = ?", (key,))
+        row = await cursor.fetchone()
+        return ast.literal_eval(row[0]) if row else None
 
 
-def get_user_team(user_id):
-    user_id = str(user_id)
-    teams = get("teams", {})  # fresh pull every time
-    print(f"🔍 get_user_team: Checking teams for user {user_id}...")
-    print(f"🧾 Raw teams loaded: {get('teams', {})}")
+async def set(key, table, value):
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute(
+            f"INSERT OR REPLACE INTO {table} (name, data) VALUES (?, ?)",
+            (key, repr(value))
+        )
+        await db.commit()
 
+
+async def delete(key, table):
+    async with aiosqlite.connect(DATABASE) as db:
+        await db.execute(f"DELETE FROM {table} WHERE name = ?", (key,))
+        await db.commit()
+
+
+# --- Team-Specific Helpers ---
+
+
+async def get_teams():
+    async with aiosqlite.connect(DATABASE) as db:
+        cursor = await db.execute("SELECT name, data FROM teams")
+        rows = await cursor.fetchall()
+        return {name: ast.literal_eval(data) for name, data in rows}
+
+
+async def save_team(name, data):
+    await set(name, "teams", data)
+
+
+async def delete_team(name):
+    await delete(name, "teams")
+
+
+async def get_user_team(user_id):
+    teams = await get_teams()
     for team_name, data in teams.items():
-        print(
-            f"🧪 Checking team '{team_name}' with members: {data.get('members', [])}")
         if user_id in data.get("members", []):
-            print(f"✅ User {user_id} is in team '{team_name}'")
-            return {
-                "name": team_name,
-                "leader_id": data.get("leader"),
-                "members": data.get("members", [])
-            }
-    print(f"🧾 Raw teams loaded: {get('teams', {})}")
-
-    print(f"❌ User {user_id} not found in any team")
+            return {"name": team_name, **data}
     return None
 
 
-
-# --- Key-value helpers ---
-
-
-def get(key, default=None):
-    return db.get(key, default)
-
-
-def set(key, value):
-    db[key] = value
-
-
-def delete(key):
-    if key in db:
-        del db[key]
-
-
-def remove_user_from_team_list(user_id, team_name):
-    team_list = get("team_list", [])
-    if not isinstance(team_list, list):
-        return
+async def remove_user_from_team_list(user_id):
+    team_list = await get("team_list", "submissions") or []
     updated_list = []
+
     for team in team_list:
-        if team["name"] == team_name:
-            if user_id in team["members"]:
-                team["members"].remove(user_id)
-            if team["leader_id"] == user_id:
-                team["leader_id"] = team["members"][0] if team["members"] else None
-            if not team["members"]:
-                continue  # remove empty team from team_list
-        updated_list.append(team)
-    set("team_list", updated_list)
+        if "members" in team and user_id in team["members"]:
+            team["members"].remove(user_id)
+        if team.get("leader_id") != user_id:
+            updated_list.append(team)
+
+    await set("team_list", "submissions", updated_list)
+    
+async def ensure_default_keys():
+    if await get("teams", "teams") is None:
+        await set("teams", "teams", {})
+    if await get("team_list", "submissions") is None:
+        await set("team_list", "submissions", [])

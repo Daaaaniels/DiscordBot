@@ -1,11 +1,12 @@
-from core.db import get_teams, get_user_team
 import discord
+from core.db import get_teams, get_user_team
 
 
-def build_panel_embed(user_id):
-    user_team = get_user_team(user_id)  # pull fresh
+async def build_panel_embed(user_id):
+    user_team = await get_user_team(user_id)
     if user_team:
-        data = get_teams().get(user_team["name"])  # pull fresh team info
+        teams = await get_teams()
+        data = teams.get(user_team["name"])
         if not data:
             return discord.Embed(
                 title="🛠️ Team Management Panel",
@@ -26,4 +27,8 @@ def build_panel_embed(user_id):
     else:
         desc = "You're not in a team. Use the buttons below to create or join one."
 
-    return discord.Embed(title="🛠️ Team Management Panel", description=desc, color=discord.Color.blue())
+    return discord.Embed(
+        title="🛠️ Team Management Panel",
+        description=desc,
+        color=discord.Color.blue()
+    )
