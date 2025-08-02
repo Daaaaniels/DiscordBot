@@ -37,7 +37,8 @@ class TeamPanel(discord.ui.View):
         self.user_team = user_team
 
         if self.user_team:
-            self.add_item(self.LeaveTeamButton(self.user_id,self.user_team["name"]))
+            self.add_item(self.LeaveTeamButton(
+                self.user_id, self.user_team["name"]))
         else:
             self.add_item(self.CreateTeamButton())
             self.add_item(self.JoinTeamButton())
@@ -66,8 +67,9 @@ class TeamPanel(discord.ui.View):
             await interaction.response.send_modal(JoinTeamModal(interaction.user.id))
 
     class LeaveTeamButton(discord.ui.Button):
-        def __init__(self, team_name):
+        def __init__(self, user_id, team_name):
             super().__init__(label="👋 Leave Team", style=discord.ButtonStyle.red)
+            self.user_id = str(user_id)
             self.team_name = team_name
 
         async def callback(self, interaction: discord.Interaction):
@@ -77,19 +79,41 @@ class TeamPanel(discord.ui.View):
 
             await interaction.response.defer(ephemeral=True)
 
-            success = await remove_user_from_all_teams(self.user_id)
+            from core.db import get_teams, save_team, db_set, get_user_team
 
-            if success:
+            teams = await get_teams()
+            team = teams.get(self.team_name)
+
+            if not team:
+                await interaction.followup.send("❌ Team not found.", ephemeral=True)
+                return
+
+            if self.user_id in team["members"]:
+                team["members"].remove(self.user_id)
+
+                # If leader is leaving, delete team
+                if team["leader"] == self.user_id:
+                    del teams[self.team_name]
+                else:
+                    teams[self.team_name] = team
+
+                await db_set("teams", "teams", teams)
+
+                # Also remove from team_list
+                from core.db import remove_user_from_team_list
+                await remove_user_from_team_list(self.user_id)
+
                 await interaction.followup.send("✅ You have left your team.", ephemeral=True)
             else:
-                await interaction.followup.send("⚠️ You were not found in any team.", ephemeral=True)
+                await interaction.followup.send("⚠️ You were not found in this team.", ephemeral=True)
 
-            # Rebuild the panel
-            from ui.embed_builder import build_panel_embed  # adjust path if needed
+            # Rebuild panel
+            from ui.embed_builder import build_panel_embed
+            from ui.team_panel import TeamPanel
+
             embed = await build_panel_embed(self.user_id)
             view = await TeamPanel.create(self.user_id, interaction.guild)
             await interaction.message.edit(embed=embed, view=view)
-
 
     class TeamInfoButtonModal(discord.ui.Button):
         def __init__(self):
