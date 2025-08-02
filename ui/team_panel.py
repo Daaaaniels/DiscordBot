@@ -2,6 +2,8 @@ import discord
 from core.db import get_teams, save_team, delete_team, get_user_team
 from ui.embed_builder import build_panel_embed
 from core.db import get
+from core.db import remove_user_from_team_list
+
 
 # --- Public: Send Panel ---
 
@@ -9,13 +11,18 @@ from core.db import get
 async def send_panel(interaction):
     try:
         print("🧪 Sending team panel...")
-        embed = build_panel_embed(interaction.user.id)
-        view = TeamPanel(interaction.user.id)
+        user_id = str(interaction.user.id)
+
+        # Don't get user_team here
+        embed = build_panel_embed(user_id)
+        view = TeamPanel(user_id)  # Remove second arg
+
         print("✅ Built panel view")
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
         print("✅ Sent panel")
     except Exception as e:
         print(f"❌ Error in send_panel: {e}")
+
 
 # --- Team Panel View ---
 
@@ -24,11 +31,11 @@ class TeamPanel(discord.ui.View):
     def __init__(self, user_id):
         super().__init__(timeout=None)
         self.user_id = str(user_id)
-        self.user_team = get_user_team(self.user_id)
+        self.user_team = get_user_team(self.user_id)  # fetch fresh every time
+        print(f"📦 TeamPanel initialized with user_team: {self.user_team}")
 
         if self.user_team:
             self.add_item(self.LeaveTeamButton(self.user_team["name"]))
-
         else:
             self.add_item(self.CreateTeamButton())
             self.add_item(self.JoinTeamButton())
@@ -58,14 +65,24 @@ class TeamPanel(discord.ui.View):
         async def callback(self, interaction: discord.Interaction):
             await interaction.response.defer(ephemeral=True)
             user_id = str(interaction.user.id)
+            print(
+                f"👋 LeaveTeamButton pressed by {user_id} for team '{self.team_name}'")
+
             teams = get_teams()
+            print(f"📦 Loaded teams: {list(teams.keys())}")
+
             team = teams.get(self.team_name)
+            if not team:
+                print(f"❌ Team '{self.team_name}' not found.")
+            else:
+                print(f"🧾 Team data before leave: {team}")
 
             if not team or user_id not in team["members"]:
                 await interaction.followup.send("You're not in this team anymore.", ephemeral=True)
                 return
 
             team["members"].remove(user_id)
+            print(f"🗑 Removed {user_id} from team '{self.team_name}'")
 
             role = discord.utils.get(
                 interaction.guild.roles, name=self.team_name)
@@ -75,16 +92,26 @@ class TeamPanel(discord.ui.View):
             if not team["members"]:
                 if role:
                     await role.delete()
+                print(f"❌ Team '{self.team_name}' deleted (no members left)")
                 delete_team(self.team_name)
             else:
                 if team["leader"] == user_id:
-                    team["leader"] = team["members"][0] if team["members"] else None
-                save_team(self.team_name, team)
+                    team["leader"] = team["members"][0]
+                print("📤 Saving team:", team_name, team)
+                save_team(team_name, team)
+                print("📦 All teams after save:", get_teams())
+
+                print(
+                    f"✅ Team '{self.team_name}' saved after leader/member update")
 
             feedback = discord.Embed(
                 description=f"✅ You left `{self.team_name}`.", color=discord.Color.blue()
             )
             await interaction.followup.send(embed=feedback, ephemeral=True)
+
+            # Debug panel refresh with delay
+            import asyncio
+            await asyncio.sleep(0.3)
             await send_panel(interaction)
 
     class TeamInfoButtonModal(discord.ui.Button):

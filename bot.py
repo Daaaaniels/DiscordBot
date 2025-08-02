@@ -13,6 +13,9 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 GUILD_ID = 1397306012557377616
 
+from core.db import set
+set("teams", {})
+set("team_list", [])
 
 @bot.event
 async def on_ready():
