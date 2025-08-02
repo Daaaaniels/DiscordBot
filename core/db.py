@@ -64,9 +64,9 @@ async def delete_team(name):
 
 async def get_user_team(user_id):
     teams = await get_teams()
-    for team_name, data in teams.items():
+    for name, data in teams.items():
         if user_id in data.get("members", []):
-            return {"name": team_name, **data}
+            return {"name": name, **data}
     return None
 
 
@@ -81,7 +81,8 @@ async def remove_user_from_team_list(user_id):
             updated_list.append(team)
 
     await set("team_list", "submissions", updated_list)
-    
+
+
 async def ensure_default_keys():
     if await get("teams", "teams") is None:
         await set("teams", "teams", {})

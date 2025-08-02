@@ -90,5 +90,14 @@ async def testsend(ctx):
     await channel.send("✅ Test message from bot")
 
 
+@bot.command()
+async def showdb(ctx):
+    from core.db import get_teams, get
+    teams = await get_teams()
+    team_list = await get("team_list", "submissions")
+
+    await ctx.send(f"🧪 teams: `{list(teams.keys())}`\n📋 team_list: `{[t['name'] for t in team_list]}`")
+
+
 # Run bot
 asyncio.run(main())
