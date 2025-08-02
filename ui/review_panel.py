@@ -1,7 +1,7 @@
 # ui/review_panel.py
 
 import discord
-from core.db import set, get
+from core.db import db_set, get
 from datetime import datetime
 
 
@@ -17,7 +17,7 @@ class SubmissionReviewPanel(discord.ui.View):
 
     class ApproveButton(discord.ui.Button):
         def __init__(self, user_id, team_name, message_id):
-            super().__init__(label="✅ Approve", style=discord.ButtonStyle.success)
+            super().__init__(label="✅ Approve", style=discord.ButtonStyle.green, custom_id="approve_submission")
             self.user_id = user_id
             self.team_name = team_name
             self.message_id = message_id
@@ -27,9 +27,10 @@ class SubmissionReviewPanel(discord.ui.View):
                 ApproveModal(self.user_id, self.team_name, self.message_id)
             )
 
+
     class RejectButton(discord.ui.Button):
         def __init__(self, user_id, message_id):
-            super().__init__(label="❌ Reject", style=discord.ButtonStyle.danger)
+            super().__init__(label="❌ Reject", style=discord.ButtonStyle.danger, custom_id="reject_submission")
             self.user_id = user_id
             self.message_id = message_id
 
@@ -37,6 +38,8 @@ class SubmissionReviewPanel(discord.ui.View):
             await interaction.response.send_modal(
                 RejectModal(self.user_id, self.message_id)
             )
+
+
 
 
 class ApproveModal(discord.ui.Modal, title="Approve Submission"):
@@ -65,8 +68,8 @@ class ApproveModal(discord.ui.Modal, title="Approve Submission"):
 
             team["points"] = new_points
             teams[self.team_name] = team
-            set("teams", teams)
-            set(f"submissions:{self.user_id}:{self.message_id}:status", "approved")
+            db_set("teams", teams)
+            db_set(f"submissions:{self.user_id}:{self.message_id}:status", "approved")
 
             await try_dm(
                 interaction.client,
@@ -101,7 +104,7 @@ class RejectModal(discord.ui.Modal, title="Reject Submission"):
         try:
             await interaction.response.defer(ephemeral=True)
 
-            set(f"submissions:{self.user_id}:{self.message_id}:status", "rejected")
+            db_set(f"submissions:{self.user_id}:{self.message_id}:status", "rejected")
 
             await try_dm(
                 interaction.client,

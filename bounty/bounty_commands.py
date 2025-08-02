@@ -5,7 +5,7 @@ from discord.ext import commands, tasks
 from discord import app_commands
 
 from bounty.bounty_posting import post_next_bounty
-from core.db import get, set, delete
+from core.db import get, db_set, delete
 
 
 class BountyCommands(commands.Cog):
@@ -25,7 +25,7 @@ class BountyCommands(commands.Cog):
 
     @app_commands.command(name="start_bounties", description="Start auto-posting bounty every 24h.")
     async def start_bounties(self, interaction: discord.Interaction):
-        set("bounty_channel_id", interaction.channel.id)
+        db_set("bounty_channel_id", interaction.channel.id)
         await interaction.response.send_message("▶️ Daily bounty posting has been enabled in this channel.", ephemeral=True)
 
     @app_commands.command(name="stop_bounties", description="Stop auto-posting bounties.")

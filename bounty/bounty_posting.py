@@ -2,7 +2,7 @@
 
 from bounty.bounty_data import BOUNTIES
 from ui.bounty_panel import create_bounty_embed
-from core.db import get, set
+from core.db import get, db_set
 
 
 async def post_next_bounty(channel):
@@ -15,8 +15,8 @@ async def post_next_bounty(channel):
 
         # Update index for next bounty
         next_index = (index + 1) % len(BOUNTIES)
-        set("last_bounty_index", next_index)
-        set("active_bounty", bounty)
+        db_set("last_bounty_index", next_index)
+        db_set("active_bounty", bounty)
         return True
     except Exception as e:
         print(f"[Bounty Error] Failed to post bounty: {e}")

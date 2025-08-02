@@ -6,10 +6,9 @@ from core.db import (
     delete_team,
     get_user_team,
     get,
-    set,
-    remove_user_from_team_list
+    db_set,  # ✅ only use this
+    remove_user_from_all_teams
 )
-
 # --- Public: Send Panel ---
 
 
@@ -18,7 +17,7 @@ async def send_panel(interaction):
         print("🧪 Sending team panel...")
         user_id = str(interaction.user.id)
 
-        embed = build_panel_embed(user_id)
+        embed = await build_panel_embed(user_id)
         view = await TeamPanel.create(user_id, interaction.guild)
 
         print("✅ Built panel view")
@@ -72,46 +71,25 @@ class TeamPanel(discord.ui.View):
             self.team_name = team_name
 
         async def callback(self, interaction: discord.Interaction):
-            await interaction.response.defer(ephemeral=True)
-            user_id = str(interaction.user.id)
-            print(
-                f"👋 LeaveTeamButton pressed by {user_id} for team '{self.team_name}'")
-
-            teams = await get_teams()
-            print(f"📦 Loaded teams: {list(teams.keys())}")
-            team = teams.get(self.team_name)
-
-            if not team or user_id not in team["members"]:
-                await interaction.followup.send("You're not in this team anymore.", ephemeral=True)
+            if str(interaction.user.id) != self.user_id:
+                await interaction.response.send_message("🚫 You can't leave someone else's team.", ephemeral=True)
                 return
 
-            team["members"].remove(user_id)
-            print(f"🗑 Removed {user_id} from team '{self.team_name}'")
+            await interaction.response.defer(ephemeral=True)
 
-            role = discord.utils.get(
-                interaction.guild.roles, name=self.team_name)
-            if role:
-                await interaction.user.remove_roles(role)
+            success = await remove_user_from_all_teams(self.user_id)
 
-            if not team["members"]:
-                if role:
-                    await role.delete()
-                print(f"❌ Team '{self.team_name}' deleted (no members left)")
-                await delete_team(self.team_name)
+            if success:
+                await interaction.followup.send("✅ You have left your team.", ephemeral=True)
             else:
-                if team["leader"] == user_id:
-                    team["leader"] = team["members"][0]
-                print("📤 Saving team:", self.team_name, team)
-                await save_team(self.team_name, team)
+                await interaction.followup.send("⚠️ You were not found in any team.", ephemeral=True)
 
-            feedback = discord.Embed(
-                description=f"✅ You left `{self.team_name}`.", color=discord.Color.blue()
-            )
-            await interaction.followup.send(embed=feedback, ephemeral=True)
+            # Rebuild the panel
+            from ui.embed_builder import build_panel_embed  # adjust path if needed
+            embed = await build_panel_embed(self.user_id)
+            view = await TeamPanel.create(self.user_id, interaction.guild)
+            await interaction.message.edit(embed=embed, view=view)
 
-            import asyncio
-            await asyncio.sleep(0.3)
-            await send_panel(interaction)
 
     class TeamInfoButtonModal(discord.ui.Button):
         def __init__(self):
@@ -170,8 +148,10 @@ class CreateTeamModal(discord.ui.Modal, title="Create a New Team"):
             return await interaction.response.send_message("❌ Team already exists.", ephemeral=True)
 
         for data in teams.values():
-            if data["leader"] == user_id:
-                return await interaction.response.send_message("❌ You already created a team.", ephemeral=True)
+            if data.get("leader") == user_id:
+                return await interaction.response.send_message(
+                    "❌ You already created a team.", ephemeral=True
+                )
 
         role = await interaction.guild.create_role(name=name)
         await interaction.user.add_roles(role)
@@ -184,7 +164,7 @@ class CreateTeamModal(discord.ui.Modal, title="Create a New Team"):
         }
         await save_team(name, team_data)
 
-        existing = await get("team_list", [])
+        existing = await get("team_list", "submissions")  # ✅ fix table name
         if not isinstance(existing, list):
             existing = []
 
@@ -194,7 +174,7 @@ class CreateTeamModal(discord.ui.Modal, title="Create a New Team"):
                 "leader_id": user_id,
                 "members": [user_id]
             })
-            await set("team_list", existing)
+            await db_set("team_list", "submissions", existing)  # ✅ use db_set
 
         embed = discord.Embed(
             description=f"✅ Team `{name}` created successfully with join code `{code}`!",

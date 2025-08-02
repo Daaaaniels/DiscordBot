@@ -14,10 +14,12 @@ class TeamCommands(commands.Cog):
     @app_commands.command(name="panel", description="Open your private team management panel")
     @app_commands.guilds(Object(id=GUILD_ID))
     async def panel(self, interaction: Interaction):
+        await interaction.response.defer(ephemeral=True)
         embed = await build_panel_embed(interaction.user.id)
         view = await TeamPanel.create(interaction.user.id, interaction.guild)
-        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+        await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
 
 async def setup(bot):
     await bot.add_cog(TeamCommands(bot))
+ 

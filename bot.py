@@ -4,6 +4,7 @@ import asyncio
 from config import DISCORD_TOKEN, REVIEW_CHANNEL_ID
 from ui.review_panel import SubmissionReviewPanel
 import logging
+from core.db import init_db, ensure_default_keys, validate_team_data, clean_malformed_teams
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -18,21 +19,30 @@ GUILD_ID = 1397306012557377616
 
 @bot.event
 async def on_ready():
-    @bot.event
-    async def on_ready():
-        from core.db import init_db, ensure_default_keys, set, get
+    from core.db import init_db, ensure_default_keys, validate_team_data, get
+    from ui.review_panel import SubmissionReviewPanel
 
-        await init_db()               # ⬅️ Create tables if missing
-        await ensure_default_keys()   # ⬅️ Populate keys if needed
+    await init_db()
+    await ensure_default_keys()
+    await validate_team_data()
 
-        bot.add_view(SubmissionReviewPanel())
-        print(f"✅ Logged in as {bot.user}")
+    # Reattach persistent views from DB
+    submissions = await get("submissions", "submissions") or {}
+    for message_id, data in submissions.items():
+        view = SubmissionReviewPanel(
+            user_id=data["user_id"],
+            team_name=data["team_name"],
+            message_id=message_id
+        )
+        bot.add_view(view)
+        print(f"🔁 Reattached view for message ID: {message_id}")
 
-        try:
-            await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-            print(f"✅ Synced slash commands to guild {GUILD_ID}")
-        except Exception as e:
-            print(f"❌ Sync error: {e}")
+    print(f"✅ Logged in as {bot.user}")
+    try:
+        await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+        print(f"✅ Synced slash commands to guild {GUILD_ID}")
+    except Exception as e:
+        print(f"❌ Sync error: {e}")
 
 
 async def load_extensions():
@@ -98,6 +108,46 @@ async def showdb(ctx):
 
     await ctx.send(f"🧪 teams: `{list(teams.keys())}`\n📋 team_list: `{[t['name'] for t in team_list]}`")
 
+
+@bot.command()
+async def fixdb(ctx):
+    from core.db import set
+    await set("Genesis Knights", "teams", {
+        "leader": str(ctx.author.id),
+        "members": [str(ctx.author.id)],
+        "points": 0,
+        "code": "1234"
+    })
+    await set("team_list", "submissions", [
+        {
+            "name": "Genesis Knights",
+            "leader_id": str(ctx.author.id),
+            "members": [str(ctx.author.id)]
+        }
+    ])
+    await ctx.send("✅ Created one test team and updated team_list.")
+
+
+@bot.command()
+async def wipe_db(ctx):
+    from core.db import delete
+    await delete("teams", "teams")  # remove bad entry
+    await delete("team_list", "submissions")
+    await ctx.send("🧼 Database wiped clean.")
+
+
+@bot.command()
+async def fix_ghosts(ctx):
+    from core.db import validate_team_data
+    await validate_team_data()
+    await ctx.send("🧹 Checked and cleaned ghost teams from team_list.")
+
+
+@bot.command()
+async def clean_teams(ctx):
+    from core.db import clean_malformed_teams
+    await clean_malformed_teams()
+    await ctx.send("✅ Cleaned malformed teams.")
 
 # Run bot
 asyncio.run(main())
