@@ -37,7 +37,7 @@ class TeamPanel(discord.ui.View):
         self.user_team = user_team
 
         if self.user_team:
-            self.add_item(self.LeaveTeamButton(self.user_team["name"]))
+            self.add_item(self.LeaveTeamButton(self.user_id,self.user_team["name"]))
         else:
             self.add_item(self.CreateTeamButton())
             self.add_item(self.JoinTeamButton())
