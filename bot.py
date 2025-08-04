@@ -1,12 +1,20 @@
 import discord
 from discord.ext import commands
 import asyncio
+import logging
+
 from config import DISCORD_TOKEN, REVIEW_CHANNEL_ID
 from ui.review_panel import SubmissionReviewPanel
-import logging
-from core.db import init_db, ensure_default_keys, validate_team_data, clean_malformed_teams
+from core.db import (
+    init_db,
+    get_teams,
+    get,
+    db_set,
+    delete,
+    get_user_team,
+)
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 intents = discord.Intents.default()
 intents.guilds = True
@@ -19,14 +27,9 @@ GUILD_ID = 1397306012557377616
 
 @bot.event
 async def on_ready():
-    from core.db import init_db, ensure_default_keys, validate_team_data, get
-    from ui.review_panel import SubmissionReviewPanel
-
     await init_db()
-    await ensure_default_keys()
-    await validate_team_data()
 
-    # Reattach persistent views from DB
+    # Reattach persistent views for submissions
     submissions = await get("submissions", "submissions") or {}
     for message_id, data in submissions.items():
         view = SubmissionReviewPanel(
@@ -48,8 +51,8 @@ async def on_ready():
 async def load_extensions():
     await bot.load_extension("cogs.team_commands")
     await bot.load_extension("cogs.admin_commands")
-    await bot.load_extension("bounty.bounty_commands")
     await bot.load_extension("cogs.submit_commands")
+    await bot.load_extension("bounty.bounty_commands")
 
 
 async def main():
@@ -57,36 +60,17 @@ async def main():
     await bot.start(DISCORD_TOKEN)
 
 
+# --- Dev Commands (Safe & Updated) ---
+
+
 @bot.command()
 async def resetteams(ctx):
-    from core.db import set
-    await set("teams", "teams", {})
+    await db_set("teams", "teams", {})
     await ctx.send("✅ DB key 'teams' has been reset to an empty dict.")
 
 
 @bot.command()
-async def migrate_teams(ctx):
-    from core.db import get, set
-    team_dict = await get("teams", "teams")
-    if not isinstance(team_dict, dict):
-        return await ctx.send("❌ 'teams' is not a dict.")
-
-    new_list = []
-    for name, data in team_dict.items():
-        if isinstance(data, dict):
-            new_list.append({
-                "name": name,
-                "leader_id": data.get("leader"),
-                "members": data.get("members", [])
-            })
-
-    await set("team_list", "submissions", new_list)
-    await ctx.send(f"✅ Migrated {len(new_list)} teams to 'team_list'.")
-
-
-@bot.command()
 async def whoami(ctx):
-    from core.db import get_user_team
     team = await get_user_team(str(ctx.author.id))
     if team:
         await ctx.send(f"✅ You are in team **{team['name']}**")
@@ -97,57 +81,17 @@ async def whoami(ctx):
 @bot.command()
 async def testsend(ctx):
     channel = bot.get_channel(REVIEW_CHANNEL_ID)
-    await channel.send("✅ Test message from bot")
+    if channel:
+        await channel.send("✅ Test message from bot")
+    else:
+        await ctx.send("❌ Review channel not found.")
 
 
 @bot.command()
 async def showdb(ctx):
-    from core.db import get_teams, get
     teams = await get_teams()
-    team_list = await get("team_list", "submissions")
-
-    await ctx.send(f"🧪 teams: `{list(teams.keys())}`\n📋 team_list: `{[t['name'] for t in team_list]}`")
+    await ctx.send(f"🧪 teams: `{list(teams.keys())}`")
 
 
-@bot.command()
-async def fixdb(ctx):
-    from core.db import set
-    await set("Genesis Knights", "teams", {
-        "leader": str(ctx.author.id),
-        "members": [str(ctx.author.id)],
-        "points": 0,
-        "code": "1234"
-    })
-    await set("team_list", "submissions", [
-        {
-            "name": "Genesis Knights",
-            "leader_id": str(ctx.author.id),
-            "members": [str(ctx.author.id)]
-        }
-    ])
-    await ctx.send("✅ Created one test team and updated team_list.")
-
-
-@bot.command()
-async def wipe_db(ctx):
-    from core.db import delete
-    await delete("teams", "teams")  # remove bad entry
-    await delete("team_list", "submissions")
-    await ctx.send("🧼 Database wiped clean.")
-
-
-@bot.command()
-async def fix_ghosts(ctx):
-    from core.db import validate_team_data
-    await validate_team_data()
-    await ctx.send("🧹 Checked and cleaned ghost teams from team_list.")
-
-
-@bot.command()
-async def clean_teams(ctx):
-    from core.db import clean_malformed_teams
-    await clean_malformed_teams()
-    await ctx.send("✅ Cleaned malformed teams.")
-
-# Run bot
+# --- Run Bot ---
 asyncio.run(main())

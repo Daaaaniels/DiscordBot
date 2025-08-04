@@ -1,9 +1,18 @@
 import discord
-from core.db import get_user_team
+from core.db import get_teams
 
 
 async def build_panel_embed(user_id):
-    user_team = await get_user_team(user_id)
+    teams = await get_teams()
+    user_team = None
+    team_name = None
+
+    # Find user's team
+    for name, data in teams.items():
+        if user_id in data.get("members", []):
+            user_team = data
+            team_name = name
+            break
 
     if not user_team:
         desc = "You're not in a team. Use the buttons below to create or join one."
@@ -14,7 +23,7 @@ async def build_panel_embed(user_id):
             f"<@{uid}>" for uid in user_team.get("members", [])) or "No members"
 
         desc = (
-            f"**Team:** `{user_team['name']}`\n"
+            f"**Team:** `{team_name}`\n"
             f"**Points:** {user_team.get('points', 0)}\n"
             f"**Leader:** {leader}\n"
             f"**Members ({len(user_team.get('members', []))}):** {members}"

@@ -1,8 +1,6 @@
-# ui/review_panel.py
-
 import discord
 from core.db import db_set, get
-from datetime import datetime
+import traceback
 
 
 class SubmissionReviewPanel(discord.ui.View):
@@ -12,12 +10,13 @@ class SubmissionReviewPanel(discord.ui.View):
         self.team_name = team_name
         self.message_id = message_id
 
-        self.add_item(self.ApproveButton(user_id, team_name, message_id))
-        self.add_item(self.RejectButton(user_id, message_id))
+        self.add_item(self.ApproveButton(
+            self.user_id, self.team_name, self.message_id))
+        self.add_item(self.RejectButton(self.user_id, self.message_id))
 
     class ApproveButton(discord.ui.Button):
         def __init__(self, user_id, team_name, message_id):
-            super().__init__(label="✅ Approve", style=discord.ButtonStyle.green, custom_id="approve_submission")
+            super().__init__(label="✅ Approve", style=discord.ButtonStyle.green)
             self.user_id = user_id
             self.team_name = team_name
             self.message_id = message_id
@@ -27,10 +26,9 @@ class SubmissionReviewPanel(discord.ui.View):
                 ApproveModal(self.user_id, self.team_name, self.message_id)
             )
 
-
     class RejectButton(discord.ui.Button):
         def __init__(self, user_id, message_id):
-            super().__init__(label="❌ Reject", style=discord.ButtonStyle.danger, custom_id="reject_submission")
+            super().__init__(label="❌ Reject", style=discord.ButtonStyle.red)
             self.user_id = user_id
             self.message_id = message_id
 
@@ -38,8 +36,6 @@ class SubmissionReviewPanel(discord.ui.View):
             await interaction.response.send_modal(
                 RejectModal(self.user_id, self.message_id)
             )
-
-
 
 
 class ApproveModal(discord.ui.Modal, title="Approve Submission"):
@@ -55,8 +51,8 @@ class ApproveModal(discord.ui.Modal, title="Approve Submission"):
         try:
             await interaction.response.defer(ephemeral=True)
 
-            teams = get("teams", {})
-            team = teams.get(self.team_name)
+            # Fetch single team instead of entire dict
+            team = await get(self.team_name, "teams")
 
             if not team:
                 return await interaction.followup.send("❌ Team not found.", ephemeral=True)
@@ -67,9 +63,10 @@ class ApproveModal(discord.ui.Modal, title="Approve Submission"):
                 return await interaction.followup.send("❌ Invalid point value.", ephemeral=True)
 
             team["points"] = new_points
-            teams[self.team_name] = team
-            db_set("teams", teams)
-            db_set(f"submissions:{self.user_id}:{self.message_id}:status", "approved")
+            await db_set(self.team_name, "teams", team)
+
+            key = f"{self.user_id}_{self.message_id}_status"
+            await db_set(key, "submissions", "approved")
 
             await try_dm(
                 interaction.client,
@@ -83,6 +80,7 @@ class ApproveModal(discord.ui.Modal, title="Approve Submission"):
         except Exception as e:
             print(f"❌ ApproveModal error: {e}")
             await interaction.followup.send("❌ Something went wrong during approval.", ephemeral=True)
+            traceback.print_exc()
 
 
 class RejectModal(discord.ui.Modal, title="Reject Submission"):
@@ -97,14 +95,13 @@ class RejectModal(discord.ui.Modal, title="Reject Submission"):
         super().__init__()
         self.user_id = user_id
         self.message_id = message_id
-        print(
-            f"📝 RejectModal created for user {user_id}, message {message_id}")
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True)
 
-            db_set(f"submissions:{self.user_id}:{self.message_id}:status", "rejected")
+            key = f"{self.user_id}_{self.message_id}_status"
+            await db_set(key, "submissions", "rejected")
 
             await try_dm(
                 interaction.client,
@@ -121,7 +118,6 @@ class RejectModal(discord.ui.Modal, title="Reject Submission"):
 
 
 # --- DM Utility ---
-
 
 async def try_dm(client, user_id, message):
     try:
