@@ -1,4 +1,16 @@
-GUILD_ID = 1397306012557377616
-# Replace or load from env if preferred
-DISCORD_TOKEN = "MTM5ODQxMjI2Nzg5MTk4MjU0OA.G4v19J.0rbBLWWdQnbDlEew3wYRoO-LxOKrmZkGvnU4rM"
-REVIEW_CHANNEL_ID = 1401096610557198406
+import os
+from dotenv import load_dotenv
+
+# Load from .env for local dev, no effect on Railway
+load_dotenv()
+
+def _to_int(key: str) -> int | None:
+    v = os.getenv(key, "").strip()
+    try:
+        return int(v) if v else None
+    except ValueError:
+        return None
+
+DISCORD_TOKEN: str | None = os.getenv("DISCORD_TOKEN")
+GENESIS_GUILD_ID: int | None = _to_int("GENESIS_GUILD_ID")
+REVIEW_CHANNEL_ID: int | None = _to_int("REVIEW_CHANNEL_ID")

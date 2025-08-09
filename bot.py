@@ -1,9 +1,11 @@
-import discord
-from discord.ext import commands
+import os
+import sys
 import asyncio
 import logging
+import discord
+from discord.ext import commands
 
-from config import DISCORD_TOKEN, REVIEW_CHANNEL_ID
+from config import DISCORD_TOKEN, REVIEW_CHANNEL_ID, GENESIS_GUILD_ID
 from ui.review_panel import SubmissionReviewPanel
 from core.db import (
     init_db,
@@ -15,59 +17,86 @@ from core.db import (
 )
 
 logging.basicConfig(level=logging.INFO)
+log = logging.getLogger("genesis.bot")
 
 intents = discord.Intents.default()
 intents.guilds = True
 intents.members = True
+# Enable only if you truly need to read message content
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-GUILD_ID = 1397306012557377616
-
 
 @bot.event
 async def on_ready():
+    # Init DB (async)
     await init_db()
 
-    # Reattach persistent views for submissions
+    # Reattach persistent views for previously-sent submission messages
     submissions = await get("submissions", "submissions") or {}
     for message_id, data in submissions.items():
-        view = SubmissionReviewPanel(
-            user_id=data["user_id"],
-            team_name=data["team_name"],
-            message_id=message_id
-        )
-        bot.add_view(view)
-        print(f"🔁 Reattached view for message ID: {message_id}")
+        try:
+            view = SubmissionReviewPanel(
+                user_id=data["user_id"],
+                team_name=data["team_name"],
+                message_id=message_id
+            )
+            bot.add_view(view)
+            log.info("🔁 Reattached view for message ID: %s", message_id)
+        except Exception as e:
+            log.exception("Failed to reattach view for %s: %s", message_id, e)
 
-    print(f"✅ Logged in as {bot.user}")
+    log.info("✅ Logged in as %s (id=%s)", bot.user, bot.user.id)
+
+    # Slash command sync: prefer fast guild-only sync if GENESIS_GUILD_ID is set
     try:
-        await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-        print(f"✅ Synced slash commands to guild {GUILD_ID}")
+        if GENESIS_GUILD_ID:
+            await bot.tree.sync(guild=discord.Object(id=GENESIS_GUILD_ID))
+            log.info("✅ Synced slash commands to guild %s", GENESIS_GUILD_ID)
+        else:
+            await bot.tree.sync()
+            log.info("✅ Synced global slash commands")
     except Exception as e:
-        print(f"❌ Sync error: {e}")
-
+        log.exception("❌ Slash command sync error: %s", e)
 
 async def load_extensions():
-    await bot.load_extension("cogs.team_commands")
-    await bot.load_extension("cogs.admin_commands")
-    await bot.load_extension("cogs.submit_commands")
-    await bot.load_extension("bounty.bounty_commands")
-
+    """Load cogs/extensions with clear logging."""
+    extensions = [
+        "cogs.team_commands",
+        "cogs.admin_commands",
+        "cogs.submit_commands",
+        "bounty.bounty_commands",
+    ]
+    for ext in extensions:
+        try:
+            await bot.load_extension(ext)
+            log.info("🔌 Loaded extension: %s", ext)
+        except Exception as e:
+            log.exception("❌ Failed to load %s: %s", ext, e)
 
 async def main():
-    await load_extensions()
-    await bot.start(DISCORD_TOKEN)
+    # Fail fast if token is missing
+    if not DISCORD_TOKEN:
+        sys.stderr.write(
+            "[FATAL] DISCORD_TOKEN is not set. "
+            "On Railway: add it under Variables. Locally: put it in .env.\n"
+        )
+        sys.exit(1)
 
+    await load_extensions()
+    try:
+        await bot.start(DISCORD_TOKEN)
+    except KeyboardInterrupt:
+        log.info("Shutting down…")
+    finally:
+        await bot.close()
 
 # --- Dev Commands (Safe & Updated) ---
-
 
 @bot.command()
 async def resetteams(ctx):
     await db_set("teams", "teams", {})
     await ctx.send("✅ DB key 'teams' has been reset to an empty dict.")
-
 
 @bot.command()
 async def whoami(ctx):
@@ -77,21 +106,22 @@ async def whoami(ctx):
     else:
         await ctx.send("❌ You're not in any team.")
 
-
 @bot.command()
 async def testsend(ctx):
-    channel = bot.get_channel(REVIEW_CHANNEL_ID)
+    if REVIEW_CHANNEL_ID is None:
+        return await ctx.send("❌ REVIEW_CHANNEL_ID is not configured.")
+    channel = bot.get_channel(REVIEW_CHANNEL_ID) or await bot.fetch_channel(REVIEW_CHANNEL_ID)
     if channel:
         await channel.send("✅ Test message from bot")
+        await ctx.send("✅ Sent a test message to the review channel.")
     else:
         await ctx.send("❌ Review channel not found.")
-
 
 @bot.command()
 async def showdb(ctx):
     teams = await get_teams()
     await ctx.send(f"🧪 teams: `{list(teams.keys())}`")
 
-
 # --- Run Bot ---
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
