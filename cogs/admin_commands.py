@@ -3,7 +3,7 @@
 import discord
 from discord import app_commands, Interaction, Object
 from discord.ext import commands
-from config import GUILD_ID
+from config import GENESIS_GUILD_ID
 from ui.admin_panel import AdminPanel
 
 
@@ -12,7 +12,7 @@ class AdminCommands(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="admin", description="Open the Admin Team Panel")
-    @app_commands.guilds(Object(id=GUILD_ID))
+    @app_commands.guilds(Object(id=GENESIS_GUILD_ID))
     async def admin_panel(self, interaction: Interaction):
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("🚫 You need Administrator permissions to use this command.", ephemeral=True)

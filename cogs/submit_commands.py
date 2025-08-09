@@ -4,7 +4,7 @@ from discord.ext import commands
 from datetime import datetime
 from core.db import db_set, get_user_team
 from ui.review_panel import SubmissionReviewPanel
-from config import REVIEW_CHANNEL_ID
+from config import REVIEW_CHANNEL_ID, GENESIS_GUILD_ID
 
 import logging
 log = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ class SubmitCommands(commands.Cog):
         self.bot = bot
 
     @app_commands.command(name="submit", description="Submit your Genesis Rank Point screenshot.")
-    @app_commands.guilds(discord.Object(id=GUILD_ID))
+    @app_commands.guilds(discord.Object(id=GENESIS_GUILD_ID))
     async def submit(self, interaction: discord.Interaction, attachment: discord.Attachment):
         log.info("🚀 /submit triggered")
         user_id = str(interaction.user.id)
