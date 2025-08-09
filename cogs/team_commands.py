@@ -3,7 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 import logging
 
-from config import GENESIS_GUILD_ID  # <- use this
+from config import GENESIS_GUILD_ID
 from ui.team_panel import TeamPanel
 from ui.embed_builder import build_panel_embed
 
@@ -18,7 +18,9 @@ class TeamCommands(commands.Cog):
     async def panel(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True)
+            # your async builder
             embed = await build_panel_embed(interaction.user.id)
+            # your async factory
             view = await TeamPanel.create(interaction.user.id, interaction.guild)
             await interaction.followup.send(embed=embed, view=view, ephemeral=True)
             log.info("✅ Panel opened for %s", interaction.user)
@@ -35,22 +37,25 @@ class TeamCommands(commands.Cog):
 async def setup(bot: commands.Bot):
     cog = TeamCommands(bot)
     await bot.add_cog(cog)
+
     tree = bot.tree
 
-    # Avoid duplicates/old registrations
+    # Remove any previous registrations of these names (global or guild)
     for cmd in list(tree.get_commands()):
         if cmd.name in {"panel", "genesis_status"}:
-            tree.remove_command(
-                cmd.name, type=app_commands.AppCommandType.chat_input)
+            # NOTE: do NOT pass `type=`; default is chat_input and avoids your error
+            tree.remove_command(cmd.name)
 
+    # Register for your guild (instant) or globally (slow)
     if GENESIS_GUILD_ID:
         guild = discord.Object(id=GENESIS_GUILD_ID)
         tree.add_command(cog.panel, guild=guild)
         tree.add_command(cog.genesis_status, guild=guild)
-        await tree.sync(guild=guild)
-        print(f"✅ team_commands: synced to guild {GENESIS_GUILD_ID}")
+        synced = await tree.sync(guild=guild)
+        print(
+            f"✅ team_commands: synced {len(synced)} commands to guild {GENESIS_GUILD_ID}")
     else:
         tree.add_command(cog.panel)
         tree.add_command(cog.genesis_status)
-        await tree.sync()
-        print("✅ team_commands: synced globally (may take up to ~1h)")
+        synced = await tree.sync()
+        print(f"✅ team_commands: synced {len(synced)} global commands")
