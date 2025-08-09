@@ -27,6 +27,7 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+
 @bot.event
 async def on_ready():
     # Init DB (async)
@@ -59,6 +60,7 @@ async def on_ready():
     except Exception as e:
         log.exception("❌ Slash command sync error: %s", e)
 
+
 async def load_extensions():
     """Load cogs/extensions with clear logging."""
     extensions = [
@@ -73,6 +75,7 @@ async def load_extensions():
             log.info("🔌 Loaded extension: %s", ext)
         except Exception as e:
             log.exception("❌ Failed to load %s: %s", ext, e)
+
 
 async def main():
     # Fail fast if token is missing
@@ -93,10 +96,12 @@ async def main():
 
 # --- Dev Commands (Safe & Updated) ---
 
+
 @bot.command()
 async def resetteams(ctx):
     await db_set("teams", "teams", {})
     await ctx.send("✅ DB key 'teams' has been reset to an empty dict.")
+
 
 @bot.command()
 async def whoami(ctx):
@@ -105,6 +110,7 @@ async def whoami(ctx):
         await ctx.send(f"✅ You are in team **{team['name']}**")
     else:
         await ctx.send("❌ You're not in any team.")
+
 
 @bot.command()
 async def testsend(ctx):
@@ -117,10 +123,27 @@ async def testsend(ctx):
     else:
         await ctx.send("❌ Review channel not found.")
 
+
 @bot.command()
 async def showdb(ctx):
     teams = await get_teams()
     await ctx.send(f"🧪 teams: `{list(teams.keys())}`")
+
+
+@bot.command()
+@commands.is_owner()
+async def sync(ctx):
+    from config import GENESIS_GUILD_ID
+    if not GENESIS_GUILD_ID:
+        return await ctx.send("GENESIS_GUILD_ID not set.")
+    guild = discord.Object(id=GENESIS_GUILD_ID)
+    try:
+        bot.tree.clear_commands(guild=None)  # clear accidental global regs
+    except Exception:
+        pass
+    synced = await bot.tree.sync(guild=guild)
+    await ctx.send(f"Synced {len(synced)} commands to guild {GENESIS_GUILD_ID}.")
+
 
 # --- Run Bot ---
 if __name__ == "__main__":
