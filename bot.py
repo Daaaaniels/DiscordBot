@@ -133,16 +133,15 @@ async def showdb(ctx):
 @bot.command()
 @commands.is_owner()
 async def sync(ctx):
-    from config import GENESIS_GUILD_ID
     if not GENESIS_GUILD_ID:
-        return await ctx.send("GENESIS_GUILD_ID not set.")
+        return await ctx.send("GENESIS_GUILD_ID not set")
     guild = discord.Object(id=GENESIS_GUILD_ID)
     try:
         bot.tree.clear_commands(guild=None)  # clear accidental global regs
     except Exception:
         pass
     synced = await bot.tree.sync(guild=guild)
-    await ctx.send(f"Synced {len(synced)} commands to guild {GENESIS_GUILD_ID}.")
+    await ctx.send(f"Synced {len(synced)} commands to {GENESIS_GUILD_ID}.")
 
 
 # --- Run Bot ---
