@@ -18,9 +18,7 @@ class TeamCommands(commands.Cog):
     async def panel(self, interaction: discord.Interaction):
         try:
             await interaction.response.defer(ephemeral=True)
-            # your async builder
             embed = await build_panel_embed(interaction.user.id)
-            # your async factory
             view = await TeamPanel.create(interaction.user.id, interaction.guild)
             await interaction.followup.send(embed=embed, view=view, ephemeral=True)
             log.info("✅ Panel opened for %s", interaction.user)
@@ -35,27 +33,22 @@ class TeamCommands(commands.Cog):
 
 
 async def setup(bot: commands.Bot):
+    # Add cog first
     cog = TeamCommands(bot)
     await bot.add_cog(cog)
 
+    # Register commands to a guild (fast) or leave global (slow) — NO SYNC HERE
     tree = bot.tree
 
-    # Remove any previous registrations of these names (global or guild)
+    # Remove old registrations to avoid duplicates/conflicts
     for cmd in list(tree.get_commands()):
         if cmd.name in {"panel", "genesis_status"}:
-            # NOTE: do NOT pass `type=`; default is chat_input and avoids your error
-            tree.remove_command(cmd.name)
+            tree.remove_command(cmd.name)  # don't pass `type=` for max compat
 
-    # Register for your guild (instant) or globally (slow)
     if GENESIS_GUILD_ID:
         guild = discord.Object(id=GENESIS_GUILD_ID)
         tree.add_command(cog.panel, guild=guild)
         tree.add_command(cog.genesis_status, guild=guild)
-        synced = await tree.sync(guild=guild)
-        print(
-            f"✅ team_commands: synced {len(synced)} commands to guild {GENESIS_GUILD_ID}")
     else:
         tree.add_command(cog.panel)
         tree.add_command(cog.genesis_status)
-        synced = await tree.sync()
-        print(f"✅ team_commands: synced {len(synced)} global commands")
