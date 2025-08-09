@@ -3,19 +3,21 @@ import os
 import json
 import aiosqlite
 from typing import Any, Dict
+from contextlib import asynccontextmanager
 
-# Use a persistent path via env (e.g., DB_PATH=/data/genesis.db on Railway)
 DB_PATH = os.getenv("DB_PATH", "genesis.db")
 
-# --- Internal helpers ---
 
-
-async def _connect():
+@asynccontextmanager
+async def connect_db():
     db = await aiosqlite.connect(DB_PATH)
-    # Sensible pragmas for a small bot DB
+    # Safe to set pragmas after connect (and only once)
     await db.execute("PRAGMA journal_mode=WAL;")
     await db.execute("PRAGMA synchronous=NORMAL;")
-    return db
+    try:
+        yield db
+    finally:
+        await db.close()
 
 
 def _serialize(value: Any) -> str:
@@ -29,7 +31,7 @@ def _deserialize(payload: str) -> Any:
 
 
 async def init_db():
-    async with await _connect() as db:
+    async with connect_db() as db:
         await db.executescript("""
         CREATE TABLE IF NOT EXISTS teams (
           name TEXT PRIMARY KEY,
@@ -42,12 +44,12 @@ async def init_db():
         """)
         await db.commit()
 
-# --- General-purpose KV over two tables ---
+# --- General-purpose ---
 
 
 async def get(key: str, table: str):
     column = "name" if table == "teams" else "id"
-    async with await _connect() as db:
+    async with connect_db() as db:
         cur = await db.execute(f"SELECT data FROM {table} WHERE {column} = ?", (key,))
         row = await cur.fetchone()
         await cur.close()
@@ -57,7 +59,7 @@ async def get(key: str, table: str):
 async def db_set(key: str, table: str, value: Any):
     column = "name" if table == "teams" else "id"
     payload = _serialize(value)
-    async with await _connect() as db:
+    async with connect_db() as db:
         await db.execute(
             f"INSERT OR REPLACE INTO {table} ({column}, data) VALUES (?, ?)",
             (key, payload),
@@ -67,15 +69,15 @@ async def db_set(key: str, table: str, value: Any):
 
 async def delete(key: str, table: str):
     column = "name" if table == "teams" else "id"
-    async with await _connect() as db:
+    async with connect_db() as db:
         await db.execute(f"DELETE FROM {table} WHERE {column} = ?", (key,))
         await db.commit()
 
-# --- Team-specific helpers ---
+# --- Team helpers ---
 
 
 async def get_teams() -> Dict[str, dict]:
-    async with await _connect() as db:
+    async with connect_db() as db:
         cur = await db.execute("SELECT name, data FROM teams")
         rows = await cur.fetchall()
         await cur.close()
@@ -91,23 +93,23 @@ async def delete_team(name: str):
 
 
 async def get_user_team(user_id: str | int):
-    user_id = str(user_id)
+    uid = str(user_id)
     teams = await get_teams()
     for name, data in teams.items():
         members = [str(m) for m in data.get("members", [])]
-        if user_id in members:
+        if uid in members:
             return {"name": name, **data}
     return None
 
 
 async def remove_user_from_all_teams(user_id: str | int):
-    user_id = str(user_id)
+    uid = str(user_id)
     teams = await get_teams()
     changed = False
     for team_name, data in teams.items():
         members = [str(m) for m in data.get("members", [])]
-        if user_id in members:
-            data["members"] = [m for m in members if str(m) != user_id]
+        if uid in members:
+            data["members"] = [m for m in members if m != uid]
             changed = True
             if not data["members"]:
                 await delete_team(team_name)
